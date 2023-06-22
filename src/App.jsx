@@ -1,5 +1,4 @@
 import "./App.css";
-import WebCanvas from "./WebCanvas";
 
 function App() {
 	return (
@@ -18,7 +17,7 @@ function App() {
 						</a>
 					</div>
 				) : (
-					<WebCanvas />
+					<canvas width={512} height={512}></canvas>
 				)}
 			</div>
 		</>
