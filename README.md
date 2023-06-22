@@ -1,10 +1,7 @@
 # webGPU-test
 
+This application showcases a webGPU example
 
+## Scripts
 start: npm run start
-
-deploy to gh-pages: 
- 1. npm run build
- 2. git add dist -f 
- 3. git commit -m ""
- 4. git subtree push --prefix dist origin gh-pages
+deploy: npm run deploy (durch gh-pages library)
