@@ -1,4 +1,5 @@
 import "./App.css";
+import WebCanvas from "./WebCanvas";
 
 function App() {
 	return (
@@ -7,17 +8,17 @@ function App() {
 			<div className="card-full">
 				{!navigator.gpu ? (
 					<div className="support-error">
-						It seems like your current browser{" "}
+						It seems like your current browser does{" "}
 						<a
 							href="https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API#browser_compatibility"
 							target="_blank"
 							rel="noreferrer"
 						>
-							does not support WebGPU
+							not support WebGPU
 						</a>
 					</div>
 				) : (
-					<canvas width={512} height={512}></canvas>
+					<WebCanvas />
 				)}
 			</div>
 		</>
