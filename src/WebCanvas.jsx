@@ -16,6 +16,8 @@ function WebCanvas() {
 	 * init the webGpu test
 	 */
 	const initWebGPU = async (canvas) => {
+		const GRID_SIZE = 32;
+
 		if (!navigator.gpu) {
 			throw new Error("WebGPU not supported on this browser.");
 		}
@@ -50,13 +52,10 @@ function WebCanvas() {
 			-0.8, -0.8, -0.8, 0.8, 0.8, 0.8,
 		]);
 
-		// size of vertices Array (4 Byte per float(32Bit) = 48 Byte)
-		console.log(vertices.byteLength);
-
 		// buffer to hold vertices
 		const vertexBuffer = device.createBuffer({
 			label: "Cell vertices", // webGPU objects can have labels
-			size: vertices.byteLength,
+			size: vertices.byteLength, // size of vertices Array (4 Byte per float(32Bit) = 48 Byte)
 			usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST, // buffer used for vertex data and copy data into it
 		});
 
@@ -75,14 +74,32 @@ function WebCanvas() {
 			],
 		};
 
+		// uniform buffer that describes the grid.
+		const uniformArray = new Float32Array([GRID_SIZE, GRID_SIZE]);
+		const uniformBuffer = device.createBuffer({
+			label: "Grid Uniforms",
+			size: uniformArray.byteLength, // size of Float Array (4 Byte per float(32Bit) = 8 Byte)
+			usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+		});
+		device.queue.writeBuffer(uniformBuffer, 0, uniformArray);
+
 		// shader config with WebGPU Shading Language (WGSL)
 		const cellShaderModule = device.createShaderModule({
 			label: "Cell shader",
 			code: `
+			@group(0) @binding(0) var<uniform> grid: vec2f;
+
             // vertex shader gets called once for every vertex, return 4d vector, mostly parallel called
             @vertex
-            fn vertexMain(@location(0) pos: vec2f) -> @builtin(position) vec4f{ 
-				return vec4f(pos, 0, 1); // (X, Y, Z, W) 2d vector in 4d return vector
+            fn vertexMain(@location(0) pos: vec2f, @builtin(instance_index) instance: u32) -> @builtin(position) vec4f{ 
+				
+  				let i = f32(instance); // Save the instance_index as a float (casting). built in and defined in draw() -> GRID_SIZE * GRID_SIZE
+
+				let cell = vec2f(i % grid.x, floor(i / grid.x)); // compute the cell coordinate from the instance_index
+				let cellOffset = cell / grid * 2; // compute the offset to cell
+  				let gridPos = (pos + 1) / grid - 1 + cellOffset; // add 1 to the position, divide by grid size, subtract 1
+
+				return vec4f(gridPos, 0, 1); // (X, Y, Z, W) 2d vector in 4d return vector
             }
             
 			// fragment shader gets called once for every pixel drawn
@@ -114,6 +131,18 @@ function WebCanvas() {
 			},
 		});
 
+		// bind uniformBuffer to shader with bind group
+		const bindGroup = device.createBindGroup({
+			label: "Cell renderer bind group",
+			layout: cellPipeline.getBindGroupLayout(0), // @group(0) in shader
+			entries: [
+				{
+					binding: 0, // @binding(0) in shader
+					resource: { buffer: uniformBuffer },
+				},
+			],
+		});
+
 		/**
 		 * render
 		 */
@@ -134,10 +163,15 @@ function WebCanvas() {
 
 		// render pipeline
 		pass.setPipeline(cellPipeline);
+
 		// our vertices
 		pass.setVertexBuffer(0, vertexBuffer);
+
+		// bind group for grid
+		pass.setBindGroup(0, bindGroup);
+
 		// number of vertices to render (6 vertices)
-		pass.draw(vertices.length / 2);
+		pass.draw(vertices.length / 2, GRID_SIZE * GRID_SIZE);
 
 		// end render pass || still recording GPU calls for later, nothing done now
 		pass.end();
