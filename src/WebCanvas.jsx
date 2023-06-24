@@ -16,7 +16,9 @@ function WebCanvas() {
 	 * init the webGpu test
 	 */
 	const initWebGPU = async (canvas) => {
-		const GRID_SIZE = 32;
+		const GRID_SIZE = 32; // Grid size (e.g. 32 squares width and height)
+		const UPDATE_INTERVAL = 200; // Update every 200ms (5 times/sec)
+		let step = 0; // Track how many simulation steps have been run
 
 		if (!navigator.gpu) {
 			throw new Error("WebGPU not supported on this browser.");
@@ -83,11 +85,40 @@ function WebCanvas() {
 		});
 		device.queue.writeBuffer(uniformBuffer, 0, uniformArray);
 
+		// storage buffer with the active state of each cell.
+		const cellStateArray = new Uint32Array(GRID_SIZE * GRID_SIZE);
+		const cellStateStorage = [
+			// two cell states for ping pong pattern
+			device.createBuffer({
+				label: "Cell State A", //[1,0,0] -> [1,0,0] -> [0,0,1] ... better state
+				size: cellStateArray.byteLength,
+				usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+			}),
+			device.createBuffer({
+				label: "Cell State B", //[0,0,0] -> [0,1,0] -> [0,1,0] ...
+				size: cellStateArray.byteLength,
+				usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+			}),
+		];
+
+		// Mark every third cell of the first grid as active.
+		for (let i = 0; i < cellStateArray.length; i += 3) {
+			cellStateArray[i] = 1;
+		}
+		device.queue.writeBuffer(cellStateStorage[0], 0, cellStateArray);
+
+		// Mark every other cell of the second grid as active.
+		for (let i = 0; i < cellStateArray.length; i++) {
+			cellStateArray[i] = i % 2;
+		}
+		device.queue.writeBuffer(cellStateStorage[1], 0, cellStateArray);
+
 		// shader config with WebGPU Shading Language (WGSL)
 		const cellShaderModule = device.createShaderModule({
 			label: "Cell shader",
 			code: `
-			@group(0) @binding(0) var<uniform> grid: vec2f;
+			@group(0) @binding(0) var<uniform> grid: vec2f; // grid with array: grid_size,grid_size
+			@group(0) @binding(1) var<storage> cellState: array<u32>; // cell array: grid_size*grid_size
 
 			// vertex input parameter
 			struct VertexInput {
@@ -107,8 +138,9 @@ function WebCanvas() {
 				
   				let i = f32(input.instance); // Save the instance_index as a float (casting). built in and defined in draw() -> GRID_SIZE * GRID_SIZE
 				let cell = vec2f(i % grid.x, floor(i / grid.x)); // compute the cell coordinate from the instance_index
+				let state = f32(cellState[input.instance]); // cell state in array can be 0 inactive or 1 active
 				let cellOffset = cell / grid * 2; // compute the offset to cell
-  				let gridPos = (input.pos + 1) / grid - 1 + cellOffset; // add 1 to the position, divide by grid size, subtract 1
+  				let gridPos = (state*input.pos + 1) / grid - 1 + cellOffset; // calculate grid position with state and offsets
 
 				var output: VertexOutput; // return struct needs to be declared
 				output.pos = vec4f(gridPos, 0, 1); // (X, Y, Z, W) 2d vector in 4d return vector
@@ -146,59 +178,85 @@ function WebCanvas() {
 			},
 		});
 
-		// bind uniformBuffer to shader with bind group
-		const bindGroup = device.createBindGroup({
-			label: "Cell renderer bind group",
-			layout: cellPipeline.getBindGroupLayout(0), // @group(0) in shader
-			entries: [
-				{
-					binding: 0, // @binding(0) in shader
-					resource: { buffer: uniformBuffer },
-				},
-			],
-		});
+		// bind uniformBuffer, storageBuffer to shader with bind group
+		const bindGroups = [
+			device.createBindGroup({
+				label: "Cell renderer bind group A",
+				layout: cellPipeline.getBindGroupLayout(0), // @group(0) in shader
+				entries: [
+					{
+						binding: 0, // @binding(0) in shader
+						resource: { buffer: uniformBuffer }, // for grid
+					},
+					{
+						binding: 1, // @binding(1) in shader
+						resource: { buffer: cellStateStorage[0] }, // for cell state
+					},
+				],
+			}),
+			device.createBindGroup({
+				label: "Cell renderer bind group B",
+				layout: cellPipeline.getBindGroupLayout(0),
+				entries: [
+					{
+						binding: 0,
+						resource: { buffer: uniformBuffer },
+					},
+					{
+						binding: 1,
+						resource: { buffer: cellStateStorage[1] }, // same bind group with 2nd state storageBuffer
+					},
+				],
+			}),
+		];
 
-		/**
-		 * render
+		/*
+		 * render the application
 		 */
-		// records GPU commands
-		const encoder = device.createCommandEncoder();
+		function updateGrid() {
+			step++;
 
-		// begin render pass
-		const pass = encoder.beginRenderPass({
-			colorAttachments: [
-				{
-					view: context.getCurrentTexture().createView(), //needs GPUTextureView instead of GPUTexture -> .createView()
-					loadOp: "clear", // when render pass starts -> clear texture
-					clearValue: { r: 0.15, g: 0.1, b: 0.25, a: 1 }, // Color
-					storeOp: "store", // save/store any drawing from render pass into the texture
-				},
-			],
-		});
+			// records GPU commands
+			const encoder = device.createCommandEncoder();
 
-		// render pipeline
-		pass.setPipeline(cellPipeline);
+			// begin render pass
+			const pass = encoder.beginRenderPass({
+				colorAttachments: [
+					{
+						view: context.getCurrentTexture().createView(), //needs GPUTextureView instead of GPUTexture -> .createView()
+						loadOp: "clear", // when render pass starts -> clear texture
+						clearValue: { r: 0.15, g: 0.1, b: 0.25, a: 1 }, // Color
+						storeOp: "store", // save/store any drawing from render pass into the texture
+					},
+				],
+			});
 
-		// our vertices
-		pass.setVertexBuffer(0, vertexBuffer);
+			// render pipeline
+			pass.setPipeline(cellPipeline);
 
-		// bind group for grid
-		pass.setBindGroup(0, bindGroup);
+			// our vertices
+			pass.setVertexBuffer(0, vertexBuffer);
 
-		// number of vertices to render (6 vertices)
-		pass.draw(vertices.length / 2, GRID_SIZE * GRID_SIZE);
+			// bind group for grid
+			pass.setBindGroup(0, bindGroups[step % 2]);
 
-		// end render pass || still recording GPU calls for later, nothing done now
-		pass.end();
+			// number of vertices to render (6 vertices)
+			pass.draw(vertices.length / 2, GRID_SIZE * GRID_SIZE);
 
-		// create GPUCommandBuffer
-		//const commandBuffer = encoder.finish();
+			// end render pass || still recording GPU calls for later, nothing done now
+			pass.end();
 
-		// sumbit in queue to GPU
-		//device.queue.submit([commandBuffer]);
+			// create GPUCommandBuffer
+			//const commandBuffer = encoder.finish();
 
-		// Finish the command buffer and immediately submit it. -> both together
-		device.queue.submit([encoder.finish()]);
+			// sumbit in queue to GPU
+			//device.queue.submit([commandBuffer]);
+
+			// Finish the command buffer and immediately submit it. -> both together
+			device.queue.submit([encoder.finish()]);
+		}
+
+		setInterval(updateGrid, UPDATE_INTERVAL);
 	};
 
 	return (
