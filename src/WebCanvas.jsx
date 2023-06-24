@@ -89,23 +89,38 @@ function WebCanvas() {
 			code: `
 			@group(0) @binding(0) var<uniform> grid: vec2f;
 
+			// vertex input parameter
+			struct VertexInput {
+				@location(0) pos: vec2f,
+				@builtin(instance_index) instance: u32,
+			};
+			
+			// vertex output parameter
+			struct VertexOutput {
+				@builtin(position) pos: vec4f, // 4d vertex vector
+				@location(0) cell: vec2f // cell information for fragment shader
+			};
+
             // vertex shader gets called once for every vertex, return 4d vector, mostly parallel called
             @vertex
-            fn vertexMain(@location(0) pos: vec2f, @builtin(instance_index) instance: u32) -> @builtin(position) vec4f{ 
+            fn vertexMain(input: VertexInput) -> VertexOutput { 
 				
-  				let i = f32(instance); // Save the instance_index as a float (casting). built in and defined in draw() -> GRID_SIZE * GRID_SIZE
-
+  				let i = f32(input.instance); // Save the instance_index as a float (casting). built in and defined in draw() -> GRID_SIZE * GRID_SIZE
 				let cell = vec2f(i % grid.x, floor(i / grid.x)); // compute the cell coordinate from the instance_index
 				let cellOffset = cell / grid * 2; // compute the offset to cell
-  				let gridPos = (pos + 1) / grid - 1 + cellOffset; // add 1 to the position, divide by grid size, subtract 1
+  				let gridPos = (input.pos + 1) / grid - 1 + cellOffset; // add 1 to the position, divide by grid size, subtract 1
 
-				return vec4f(gridPos, 0, 1); // (X, Y, Z, W) 2d vector in 4d return vector
+				var output: VertexOutput; // return struct needs to be declared
+				output.pos = vec4f(gridPos, 0, 1); // (X, Y, Z, W) 2d vector in 4d return vector
+				output.cell = cell; // output now contains cell coordinates
+  				return output;
             }
             
 			// fragment shader gets called once for every pixel drawn
 			@fragment
-			fn fragmentMain() -> @location(0) vec4f {
-				return vec4f(0.2, 0.7, 0.8, 1); // (Red, Green, Blue, Alpha)
+			fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
+				let colorOffset= input.cell / grid;
+				return vec4f(colorOffset, 1 - colorOffset.x, 1); // (Red, Green, Blue, Alpha)
 			}
 
             `,
@@ -155,7 +170,7 @@ function WebCanvas() {
 				{
 					view: context.getCurrentTexture().createView(), //needs GPUTextureView instead of GPUTexture -> .createView()
 					loadOp: "clear", // when render pass starts -> clear texture
-					clearValue: { r: 0.3, g: 0.2, b: 0.5, a: 1 }, // Color
+					clearValue: { r: 0.15, g: 0.1, b: 0.25, a: 1 }, // Color
 					storeOp: "store", // save/store any drawing from render pass into the texture
 				},
 			],
