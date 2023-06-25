@@ -145,7 +145,7 @@ function WebCanvas() {
 				// fragment shader gets called once for every pixel drawn
 				@fragment
 				fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
-					return vec4f(input.cell / ${GRID_SIZE}, 0.5, 1); // (Red, Green, Blue, Alpha)
+					return vec4f(input.cell / grid, 0.5, 1); // (Red, Green, Blue, Alpha)
 				}
 				`,
 		});
@@ -203,7 +203,10 @@ function WebCanvas() {
 			entries: [
 				{
 					binding: 0,
-					visibility: GPUShaderStage.VERTEX | GPUShaderStage.COMPUTE, // visibility for shader stages
+					visibility:
+						GPUShaderStage.VERTEX |
+						GPUShaderStage.FRAGMENT |
+						GPUShaderStage.COMPUTE, // visibility for shader stages
 					buffer: {}, // grid (uniform buffer is default)
 				},
 				{
